@@ -1,0 +1,634 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>質數線條數獨 (完整發佈版)</title>
+    <style>
+        :root {
+            --bg-color: #f0f2f5;
+            --grid-border: #333;
+            --cell-size: 44px;
+            --pencil-color: #0069d9;
+            --default-cand-color: #90a4ae;
+            --cross-color: #dc3545;
+            --final-color: #000;
+            --select-color: #e2e6ea;
+            --edit-select-color: #fff3cd;
+            --dim-opacity: 0.15;
+            --btn-border: #ced4da;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: var(--bg-color);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 10px;
+            user-select: none;
+            touch-action: manipulation;
+            height: 100vh;
+            overflow: hidden;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        h2 { margin: 5px 0; color: #333; font-size: 1.1rem; flex-shrink: 0;}
+
+        .controls-wrapper {
+            width: 100%;
+            max-width: 450px;
+            flex-shrink: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+
+        .top-controls {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+        }
+
+        .mode-switch-btn {
+            padding: 6px 12px;
+            background-color: #6c757d;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            font-size: 13px;
+            cursor: pointer;
+            width: 100%;
+        }
+        .mode-switch-btn.editing { background-color: #ffc107; color: #000; font-weight: bold; }
+
+        .toolbar {
+            display: flex;
+            gap: 5px;
+            background: white;
+            padding: 5px;
+            border-radius: 8px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            justify-content: space-between;
+        }
+
+        .tool-btn {
+            flex: 1;
+            border: 1px solid #dee2e6;
+            background: white;
+            cursor: pointer;
+            padding: 6px 0;
+            font-size: 13px;
+            border-radius: 5px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 3px;
+        }
+        .tool-btn.active { background-color: #e9ecef; border-color: #007bff; color: #007bff; font-weight: bold; }
+
+        .hidden { display: none !important; }
+
+        .board-wrapper {
+            flex-shrink: 0;
+            margin: 5px 0;
+            position: relative;
+        }
+
+        #svg-layer {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            pointer-events: none; z-index: 10; 
+        }
+
+        .grey-line {
+            stroke: #999; stroke-width: 6; stroke-linecap: round; opacity: 0.5;
+        }
+
+        .sudoku-grid {
+            display: grid;
+            grid-template-columns: repeat(9, var(--cell-size));
+            grid-template-rows: repeat(9, var(--cell-size));
+            border: 2px solid var(--grid-border);
+            background: transparent;
+            position: relative;
+            z-index: 5;
+        }
+
+        .board-bg {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: white; z-index: 0;
+        }
+
+        .cell {
+            border: 1px solid #ccc; position: relative; cursor: pointer;
+            display: flex; justify-content: center; align-items: center; background: transparent;
+        }
+        .cell:nth-child(3n) { border-right: 2px solid var(--grid-border); }
+        .cell:nth-child(9n) { border-right: 1px solid #ccc; } 
+        .cell:nth-child(n+19):nth-child(-n+27), .cell:nth-child(n+46):nth-child(-n+54) { border-bottom: 2px solid var(--grid-border); }
+        .cell.col-2, .cell.col-5 { border-right: 2px solid var(--grid-border); }
+        .cell.row-2, .cell.row-5 { border-bottom: 2px solid var(--grid-border); }
+        .cell.selected { background-color: var(--select-color) !important; }
+        .cell.edit-selected { background-color: var(--edit-select-color) !important; border: 2px dashed #ffc107; }
+
+        .candidates-grid {
+            display: grid; grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(3, 1fr);
+            width: 100%; height: 100%; pointer-events: none;
+        }
+        .candidate {
+            font-size: 10px; color: var(--default-cand-color);
+            display: flex; justify-content: center; align-items: center; position: relative; font-weight: 500;
+        }
+        .candidate.active-cand { color: var(--pencil-color); font-weight: 900; }
+        
+        .candidate.crossed-cand { 
+            color: var(--cross-color); opacity: 0.4; text-decoration: line-through; 
+        }
+        .candidate.crossed-cand::after {
+            content: '×'; position: absolute; font-size: 14px; font-weight: bold; color: var(--cross-color); opacity: 1;
+        }
+
+        .final-value {
+            position: absolute; font-size: 28px; color: var(--final-color); font-weight: bold;
+            display: none; background-color: rgba(255,255,255,0.9); width: 100%; height: 100%;
+            justify-content: center; align-items: center;
+        }
+        .cell.has-value .final-value { display: flex; }
+        .cell.has-value .candidates-grid { display: none; }
+        .cell.fixed .final-value { color: #000; background-color: #ddd; } 
+
+        .message-box {
+            margin: 2px 0; padding: 2px; width: 100%; max-width: 450px;
+            text-align: center; border-radius: 5px; font-size: 12px; min-height: 20px;
+            flex-shrink: 0;
+        }
+        .msg-ok { color: #155724; }
+        .msg-err { background-color: #f8d7da; color: #721c24; }
+        .msg-info { background-color: #cce5ff; color: #004085; }
+
+        .cascade-container {
+            width: 100%;
+            max-width: 450px;
+            flex-grow: 1;
+            background: white;
+            border-top: 1px solid #eee;
+            display: flex;
+            justify-content: space-between;
+            padding: 5px 2px;
+            box-sizing: border-box;
+            overflow-y: auto;
+        }
+
+        .num-column {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            border-right: 1px dashed #eee;
+            transition: opacity 0.2s;
+        }
+        .num-column:last-child { border-right: none; }
+
+        .num-column.dimmed { opacity: var(--dim-opacity); pointer-events: none; }
+        .num-column.hidden-col { display: none; }
+
+        .num-btn {
+            width: 36px; height: 36px; border-radius: 50%;
+            background: white; border: 1px solid var(--btn-border);
+            font-size: 18px; font-weight: bold; color: #333;
+            cursor: pointer; margin-bottom: 5px;
+            display: flex; justify-content: center; align-items: center;
+            box-shadow: 0 2px 2px rgba(0,0,0,0.05);
+            transition: all 0.1s;
+        }
+        .num-btn:active { transform: scale(0.95); background: #f0f0f0; }
+        
+        .num-btn.btn-crossed {
+            background-color: #f8d7da; color: #dc3545; text-decoration: line-through; border-color: #dc3545;
+        }
+
+        .pair-list {
+            display: flex; flex-direction: column; gap: 3px; width: 100%; align-items: center;
+        }
+        .pair-item {
+            font-size: 11px; color: #666; background: #f8f9fa;
+            padding: 2px 4px; border-radius: 4px; white-space: nowrap;
+        }
+        .pair-item strong { color: #000; }
+
+    </style>
+</head>
+<body>
+
+    <h2>質數線條數獨</h2>
+
+    <div class="controls-wrapper">
+        <div class="top-controls">
+            <button id="mode-toggle" class="mode-switch-btn" onclick="toggleEditMode()">🛠️ 編輯模式 (畫線/設題)</button>
+            <button id="clear-all-btn" class="mode-switch-btn hidden" onclick="clearAllData()" style="background-color: #dc3545; width: auto;">🗑️ 清空所有</button>
+        </div>
+
+        <div class="toolbar" id="solver-toolbar">
+            <button class="tool-btn" id="btn-pencil" onclick="setTool('pencil')">✏️ 預選(藍)</button>
+            <button class="tool-btn active" id="btn-pen" onclick="setTool('pen')">🖊️ 確定</button>
+            <button class="tool-btn" id="btn-cross" onclick="setTool('cross')">❌ 排除(紅)</button>
+            <button class="tool-btn" onclick="clearCell()">🧹 擦除</button>
+        </div>
+    </div>
+
+    <div class="board-wrapper">
+        <div class="board-bg"></div>
+        <svg id="svg-layer"></svg>
+        <div class="sudoku-grid" id="grid"></div>
+    </div>
+
+    <div id="message" class="message-box msg-ok">請選擇工具開始解題</div>
+
+    <div class="cascade-container" id="cascade-panel"></div>
+
+<script>
+    const GRID_SIZE = 9;
+    let currentTool = 'pen'; 
+    let selectedCell = null; 
+    let board = []; 
+    let isEditMode = false;
+    let editStartCell = null; 
+    let lines = []; 
+    let longPressTimer = null;
+
+    const primes = [2, 3, 5, 7, 11, 13, 17];
+    const numberPairs = {
+        1: [1, 2, 4, 6], 2: [1, 3, 5, 9], 3: [2, 4, 8], 4: [1, 3, 7, 9],
+        5: [2, 6, 8], 6: [1, 5, 7], 7: [4, 6], 8: [3, 5, 9], 9: [2, 4, 8]
+    };
+
+    function init() {
+        loadData();
+        renderGrid();
+        renderCascadePanel();
+        drawLines();
+        refreshBoardView();
+        updateContextTools(); 
+    }
+
+    function loadData() {
+        const savedLines = localStorage.getItem('sudoku-lines');
+        if (savedLines) lines = JSON.parse(savedLines);
+        else lines = [];
+
+        const savedBoard = localStorage.getItem('sudoku-board');
+        if (savedBoard) {
+            board = JSON.parse(savedBoard);
+        } else {
+            for(let r=0; r<GRID_SIZE; r++) {
+                board[r] = [];
+                for(let c=0; c<GRID_SIZE; c++) {
+                    board[r][c] = { value: null, candidates: Array(10).fill(false), crossed: Array(10).fill(false), fixed: false };
+                }
+            }
+            // 預設題目 (如果沒有存檔)
+            board[7][1] = { value: 3, candidates: Array(10).fill(false), crossed: Array(10).fill(false), fixed: true };
+        }
+    }
+
+    function saveData() {
+        localStorage.setItem('sudoku-lines', JSON.stringify(lines));
+        localStorage.setItem('sudoku-board', JSON.stringify(board));
+    }
+
+    function renderGrid() {
+        const gridEl = document.getElementById('grid');
+        gridEl.innerHTML = '';
+        for(let r=0; r<GRID_SIZE; r++) {
+            for(let c=0; c<GRID_SIZE; c++) {
+                const cell = document.createElement('div');
+                cell.className = `cell row-${r} col-${c}`;
+                cell.dataset.r = r; cell.dataset.c = c;
+                
+                // 綁定事件處理長按
+                cell.addEventListener('touchstart', (e) => handleCellTouchStart(r, c, e));
+                cell.addEventListener('touchend', handleCellTouchEnd);
+                cell.addEventListener('mousedown', (e) => handleCellTouchStart(r, c, e));
+                cell.addEventListener('mouseup', handleCellTouchEnd);
+                cell.onclick = (e) => onCellClick(r, c, e);
+
+                const candGrid = document.createElement('div');
+                candGrid.className = 'candidates-grid';
+                for(let i=1; i<=9; i++) {
+                    const span = document.createElement('span');
+                    span.className = 'candidate';
+                    span.id = `cand-${r}-${c}-${i}`;
+                    span.innerText = i;
+                    candGrid.appendChild(span);
+                }
+                cell.appendChild(candGrid);
+                const valDiv = document.createElement('div');
+                valDiv.className = 'final-value';
+                valDiv.id = `val-${r}-${c}`;
+                cell.appendChild(valDiv);
+                gridEl.appendChild(cell);
+            }
+        }
+    }
+
+    function renderCascadePanel() {
+        const container = document.getElementById('cascade-panel');
+        container.innerHTML = '';
+        for (let i = 1; i <= 9; i++) {
+            const col = document.createElement('div');
+            col.className = 'num-column'; col.id = `col-${i}`;
+            const btn = document.createElement('button');
+            btn.className = 'num-btn'; btn.id = `num-btn-${i}`;
+            btn.innerText = i; btn.onclick = () => handleInput(i);
+            col.appendChild(btn);
+            const list = document.createElement('div');
+            list.className = 'pair-list';
+            numberPairs[i].forEach(p => {
+                const item = document.createElement('div');
+                item.className = 'pair-item';
+                item.innerHTML = `${i}+<strong>${p}</strong>`; 
+                list.appendChild(item);
+            });
+            col.appendChild(list);
+            container.appendChild(col);
+        }
+    }
+
+    function getImpossibleCandidates(r, c) {
+        const cellData = board[r][c];
+        const impossible = new Set();
+        for (let n = 1; n <= 9; n++) { if (cellData.crossed[n]) impossible.add(n); }
+        for (let i = 0; i < 9; i++) {
+            if (i !== c && board[r][i].value !== null) impossible.add(board[r][i].value);
+            if (i !== r && board[i][c].value !== null) impossible.add(board[i][c].value);
+        }
+        const startR = Math.floor(r / 3) * 3;
+        const startC = Math.floor(c / 3) * 3;
+        for (let i = 0; i < 3; i++) {
+            for (let j = 0; j < 3; j++) {
+                const rr = startR + i; const cc = startC + j;
+                if ((rr !== r || cc !== c) && board[rr][cc].value !== null) impossible.add(board[rr][cc].value);
+            }
+        }
+        let lineDegree = 0; let neighbors = [];
+        lines.forEach(l => {
+            if (l.r1 === r && l.c1 === c) { lineDegree++; neighbors.push({r: l.r2, c: l.c2}); }
+            else if (l.r2 === r && l.c2 === c) { lineDegree++; neighbors.push({r: l.r1, c: l.c1}); }
+        });
+        for (let n = 1; n <= 9; n++) { if (numberPairs[n].length < lineDegree) impossible.add(n); }
+        if (neighbors.length > 0) {
+            neighbors.forEach(nb => {
+                const nbVal = board[nb.r][nb.c].value;
+                if (nbVal !== null) {
+                    for (let n = 1; n <= 9; n++) {
+                        if (!impossible.has(n)) {
+                            if (!primes.includes(nbVal + n)) impossible.add(n);
+                        }
+                    }
+                }
+            });
+        }
+        return impossible;
+    }
+
+    function refreshBoardView() {
+        for (let r = 0; r < 9; r++) { for (let c = 0; c < 9; c++) { updateCellView(r, c); } }
+    }
+
+    function updateCellView(r, c) {
+        const data = board[r][c];
+        const valDiv = document.getElementById(`val-${r}-${c}`);
+        const cell = document.querySelector(`.cell[data-r="${r}"][data-c="${c}"]`);
+        
+        if (data.value) {
+            valDiv.innerText = data.value;
+            cell.classList.add('has-value');
+            if (data.fixed) cell.classList.add('fixed'); else cell.classList.remove('fixed');
+        } else {
+            valDiv.innerText = '';
+            cell.classList.remove('has-value'); cell.classList.remove('fixed');
+        }
+
+        const impossibleSet = getImpossibleCandidates(r, c);
+        for(let i=1; i<=9; i++) {
+            const el = document.getElementById(`cand-${r}-${c}-${i}`);
+            el.className = 'candidate';
+            if (data.candidates[i]) {
+                el.classList.add('active-cand');
+                if (impossibleSet.has(i)) el.classList.add('crossed-cand'); 
+            } else if (impossibleSet.has(i)) {
+                el.classList.add('crossed-cand');
+            }
+        }
+    }
+
+    function updateContextTools() {
+        if (isEditMode || !selectedCell) { resetTools(); return; }
+        const {r, c} = selectedCell;
+        const cellData = board[r][c];
+        const impossibleSet = getImpossibleCandidates(r, c);
+        for(let n=1; n<=9; n++) {
+            const col = document.getElementById(`col-${n}`);
+            const btn = document.getElementById(`num-btn-${n}`);
+            col.classList.remove('dimmed', 'hidden-col');
+            btn.classList.remove('btn-crossed');
+            if (cellData.value !== null) {
+                if (cellData.value !== n) col.classList.add('hidden-col');
+                continue;
+            }
+            if (impossibleSet.has(n)) {
+                col.classList.add('dimmed');
+                btn.classList.add('btn-crossed');
+            }
+        }
+    }
+
+    function resetTools() {
+        for(let n=1; n<=9; n++) {
+            document.getElementById(`col-${n}`).classList.remove('dimmed', 'hidden-col');
+            document.getElementById(`num-btn-${n}`).classList.remove('btn-crossed');
+        }
+    }
+
+    // --- 事件處理 ---
+    function handleCellTouchStart(r, c, e) {
+        if (!isEditMode) return;
+        longPressTimer = setTimeout(() => {
+            // 長按觸發設定已知數字
+            e.preventDefault(); // 防止觸發 click
+            const val = prompt("設定已知數字 (1-9)，輸入 0 或空值清除：");
+            if (val !== null) {
+                const num = parseInt(val);
+                if (num >= 1 && num <= 9) {
+                    board[r][c] = { value: num, candidates: Array(10).fill(false), crossed: Array(10).fill(false), fixed: true };
+                } else {
+                    board[r][c] = { value: null, candidates: Array(10).fill(false), crossed: Array(10).fill(false), fixed: false };
+                }
+                saveData();
+                refreshBoardView();
+                clearSelection();
+            }
+        }, 500); // 500ms 長按
+    }
+
+    function handleCellTouchEnd() {
+        if (longPressTimer) {
+            clearTimeout(longPressTimer);
+            longPressTimer = null;
+        }
+    }
+
+    function onCellClick(r, c, e) {
+        if (longPressTimer) return; // 如果是長按操作，忽略點擊
+        if (isEditMode) handleEditClick(r, c); else handleSolverClick(r, c);
+    }
+
+    function handleSolverClick(r, c) {
+        if (selectedCell) document.querySelector(`.cell[data-r="${selectedCell.r}"][data-c="${selectedCell.c}"]`).classList.remove('selected');
+        selectedCell = {r, c};
+        document.querySelector(`.cell[data-r="${r}"][data-c="${c}"]`).classList.add('selected');
+        updateContextTools();
+    }
+
+    function handleInput(num) {
+        if (isEditMode || !selectedCell) return;
+        const {r, c} = selectedCell;
+        const cellData = board[r][c];
+        if (cellData.fixed) return; 
+
+        if (currentTool === 'pen') {
+            if (cellData.value === num) cellData.value = null;
+            else { cellData.value = num; cellData.candidates.fill(false); cellData.crossed.fill(false); }
+            saveData(); refreshBoardView(); validateBoard();
+        } else if (currentTool === 'pencil') {
+            if (cellData.value) return; 
+            cellData.candidates[num] = !cellData.candidates[num];
+            saveData(); updateCellView(r, c);
+        } else if (currentTool === 'cross') {
+            if (cellData.value) return;
+            cellData.crossed[num] = !cellData.crossed[num];
+            if(cellData.crossed[num]) cellData.candidates[num] = false;
+            saveData(); updateCellView(r, c);
+        }
+        updateContextTools();
+    }
+
+    function toggleEditMode() {
+        isEditMode = !isEditMode;
+        const btn = document.getElementById('mode-toggle');
+        const clearBtn = document.getElementById('clear-all-btn');
+        const solverToolbar = document.getElementById('solver-toolbar');
+        const cascadePanel = document.getElementById('cascade-panel');
+        const msg = document.getElementById('message');
+        clearSelection(); updateContextTools();
+        if (isEditMode) {
+            btn.innerHTML = '✅ 完成編輯'; btn.classList.add('editing');
+            clearBtn.classList.remove('hidden'); solverToolbar.classList.add('hidden'); cascadePanel.classList.add('hidden');
+            msg.className = 'message-box msg-info'; msg.innerText = '編輯模式：點兩點連線(重複刪除)，長按格子設定題目數字';
+        } else {
+            btn.innerHTML = '🛠️ 編輯模式'; btn.classList.remove('editing');
+            clearBtn.classList.add('hidden'); solverToolbar.classList.remove('hidden'); cascadePanel.classList.remove('hidden');
+            msg.className = 'message-box msg-ok'; msg.innerText = '請開始解題';
+            saveData(); validateBoard(); refreshBoardView(); 
+        }
+    }
+
+    function handleEditClick(r, c) {
+        const cell = document.querySelector(`.cell[data-r="${r}"][data-c="${c}"]`);
+        if (!editStartCell) { editStartCell = {r, c}; cell.classList.add('edit-selected'); }
+        else {
+            const start = editStartCell; const end = {r, c};
+            document.querySelector(`.cell[data-r="${start.r}"][data-c="${start.c}"]`).classList.remove('edit-selected');
+            editStartCell = null;
+            if (start.r === end.r && start.c === end.c) return;
+            toggleLine(start, end);
+        }
+    }
+
+    function toggleLine(p1, p2) {
+        const existingIdx = lines.findIndex(l => (l.r1 === p1.r && l.c1 === p1.c && l.r2 === p2.r && l.c2 === p2.c) || (l.r1 === p2.r && l.c1 === p2.c && l.r2 === p1.r && l.c2 === p1.c));
+        if (existingIdx >= 0) lines.splice(existingIdx, 1); else lines.push({r1: p1.r, c1: p1.c, r2: p2.r, c2: p2.c});
+        saveData(); drawLines();
+    }
+
+    function clearAllData() {
+        if(confirm('確定要清空所有線條和題目數字嗎？此操作無法復原。')) {
+            lines = [];
+            for(let r=0; r<GRID_SIZE; r++) {
+                for(let c=0; c<GRID_SIZE; c++) {
+                    board[r][c] = { value: null, candidates: Array(10).fill(false), crossed: Array(10).fill(false), fixed: false };
+                }
+            }
+            saveData(); drawLines(); refreshBoardView();
+        }
+    }
+
+    function clearSelection() {
+        if (selectedCell) document.querySelector(`.cell[data-r="${selectedCell.r}"][data-c="${selectedCell.c}"]`).classList.remove('selected');
+        selectedCell = null;
+        if (editStartCell) document.querySelector(`.cell[data-r="${editStartCell.r}"][data-c="${editStartCell.c}"]`).classList.remove('edit-selected');
+        editStartCell = null;
+        resetTools();
+    }
+
+    function setTool(tool) {
+        currentTool = tool;
+        document.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active'));
+        document.getElementById(`btn-${tool === 'cross' ? 'cross' : (tool === 'pencil' ? 'pencil' : 'pen')}`).classList.add('active');
+    }
+
+    function clearCell() {
+        if (!selectedCell) return;
+        const {r, c} = selectedCell;
+        if (board[r][c].fixed) return;
+        board[r][c].value = null; board[r][c].candidates.fill(false); board[r][c].crossed.fill(false);
+        saveData(); refreshBoardView(); validateBoard(); updateContextTools();
+    }
+
+    function drawLines() {
+        const svg = document.getElementById('svg-layer'); svg.innerHTML = ''; 
+        const cellSize = 44; const offset = cellSize / 2;
+        lines.forEach(l => {
+            const x1 = l.c1 * cellSize + offset; const y1 = l.r1 * cellSize + offset;
+            const x2 = l.c2 * cellSize + offset; const y2 = l.r2 * cellSize + offset;
+            const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+            line.setAttribute("x1", x1); line.setAttribute("y1", y1); line.setAttribute("x2", x2); line.setAttribute("y2", y2);
+            line.setAttribute("class", "grey-line"); svg.appendChild(line);
+        });
+    }
+
+    function validateBoard() {
+        const msgEl = document.getElementById('message');
+        if (isEditMode) return;
+        let errors = [];
+        for (let i = 0; i < 9; i++) {
+            let rowVals = {}; let colVals = {};
+            for (let j = 0; j < 9; j++) {
+                let rv = board[i][j].value; if (rv) { if (rowVals[rv]) errors.push(`第 ${i+1} 列重複: ${rv}`); rowVals[rv] = true; }
+                let cv = board[j][i].value; if (cv) { if (colVals[cv]) errors.push(`第 ${i+1} 行重複: ${cv}`); colVals[cv] = true; }
+            }
+        }
+        for (let br = 0; br < 3; br++) {
+            for (let bc = 0; bc < 3; bc++) {
+                let boxVals = {};
+                for (let r = 0; r < 3; r++) {
+                    for (let c = 0; c < 3; c++) {
+                        let val = board[br*3+r][bc*3+c].value;
+                        if (val) { if (boxVals[val]) errors.push(`宮內重複: ${val}`); boxVals[val] = true; }
+                    }
+                }
+            }
+        }
+        lines.forEach(l => {
+            const v1 = board[l.r1][l.c1].value; const v2 = board[l.r2][l.c2].value;
+            if (v1 && v2 && !primes.includes(v1 + v2)) errors.push(`線條錯誤: ${v1}+${v2}=${v1+v2} (非質數)`);
+        });
+        if (errors.length > 0) { msgEl.className = 'message-box msg-err'; msgEl.innerText = errors[0]; }
+        else { msgEl.className = 'message-box msg-ok'; msgEl.innerText = '目前規則檢查通過 ✓'; }
+    }
+
+    window.onload = init;
+</script>
+</body>
+</html>
