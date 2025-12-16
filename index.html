@@ -3,12 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>質數線條數獨 (完整發佈版)</title>
+    <title>質數線條數獨 (分享版)</title>
     <style>
         :root {
             --bg-color: #f0f2f5;
             --grid-border: #333;
-            --cell-size: 44px;
+            --cell-size: 42px; /* 手機適配微調 */
             --pencil-color: #0069d9;
             --default-cand-color: #90a4ae;
             --cross-color: #dc3545;
@@ -46,8 +46,9 @@
 
         .top-controls {
             display: flex;
-            gap: 10px;
+            gap: 5px;
             justify-content: center;
+            flex-wrap: wrap;
         }
 
         .mode-switch-btn {
@@ -58,9 +59,11 @@
             border-radius: 5px;
             font-size: 13px;
             cursor: pointer;
-            width: 100%;
+            flex: 1;
+            white-space: nowrap;
         }
         .mode-switch-btn.editing { background-color: #ffc107; color: #000; font-weight: bold; }
+        .mode-switch-btn.share { background-color: #28a745; color: white; }
 
         .toolbar {
             display: flex;
@@ -162,6 +165,7 @@
             margin: 2px 0; padding: 2px; width: 100%; max-width: 450px;
             text-align: center; border-radius: 5px; font-size: 12px; min-height: 20px;
             flex-shrink: 0;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
         }
         .msg-ok { color: #155724; }
         .msg-err { background-color: #f8d7da; color: #721c24; }
@@ -194,9 +198,9 @@
         .num-column.hidden-col { display: none; }
 
         .num-btn {
-            width: 36px; height: 36px; border-radius: 50%;
+            width: 32px; height: 32px; border-radius: 50%;
             background: white; border: 1px solid var(--btn-border);
-            font-size: 18px; font-weight: bold; color: #333;
+            font-size: 16px; font-weight: bold; color: #333;
             cursor: pointer; margin-bottom: 5px;
             display: flex; justify-content: center; align-items: center;
             box-shadow: 0 2px 2px rgba(0,0,0,0.05);
@@ -212,10 +216,22 @@
             display: flex; flex-direction: column; gap: 3px; width: 100%; align-items: center;
         }
         .pair-item {
-            font-size: 11px; color: #666; background: #f8f9fa;
-            padding: 2px 4px; border-radius: 4px; white-space: nowrap;
+            font-size: 10px; color: #666; background: #f8f9fa;
+            padding: 2px 3px; border-radius: 4px; white-space: nowrap;
         }
         .pair-item strong { color: #000; }
+
+        /* Modal 樣式 */
+        .modal-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.5); z-index: 1000; display: none;
+            justify-content: center; align-items: center;
+        }
+        .modal {
+            background: white; padding: 20px; border-radius: 10px; width: 80%; max-width: 300px;
+            text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        .modal button { margin-top: 10px; padding: 8px 16px; cursor: pointer; }
 
     </style>
 </head>
@@ -225,14 +241,15 @@
 
     <div class="controls-wrapper">
         <div class="top-controls">
-            <button id="mode-toggle" class="mode-switch-btn" onclick="toggleEditMode()">🛠️ 編輯模式 (畫線/設題)</button>
-            <button id="clear-all-btn" class="mode-switch-btn hidden" onclick="clearAllData()" style="background-color: #dc3545; width: auto;">🗑️ 清空所有</button>
+            <button id="mode-toggle" class="mode-switch-btn" onclick="toggleEditMode()">🛠️ 編輯關卡</button>
+            <button id="share-btn" class="mode-switch-btn share" onclick="shareLevel()">📤 分享連結</button>
+            <button id="clear-all-btn" class="mode-switch-btn hidden" onclick="clearAllData()" style="background-color: #dc3545;">🗑️ 清空</button>
         </div>
 
         <div class="toolbar" id="solver-toolbar">
-            <button class="tool-btn" id="btn-pencil" onclick="setTool('pencil')">✏️ 預選(藍)</button>
+            <button class="tool-btn" id="btn-pencil" onclick="setTool('pencil')">✏️ 預選</button>
             <button class="tool-btn active" id="btn-pen" onclick="setTool('pen')">🖊️ 確定</button>
-            <button class="tool-btn" id="btn-cross" onclick="setTool('cross')">❌ 排除(紅)</button>
+            <button class="tool-btn" id="btn-cross" onclick="setTool('cross')">❌ 排除</button>
             <button class="tool-btn" onclick="clearCell()">🧹 擦除</button>
         </div>
     </div>
@@ -264,14 +281,29 @@
     };
 
     function init() {
-        loadData();
+        // 優先檢查 URL 是否有分享的關卡參數
+        const urlParams = new URLSearchParams(window.location.search);
+        const levelData = urlParams.get('level');
+
+        if (levelData) {
+            loadLevelFromURL(levelData);
+        } else {
+            loadData();
+        }
+
         renderGrid();
         renderCascadePanel();
         drawLines();
         refreshBoardView();
         updateContextTools(); 
+        
+        // 如果是分享連結進來的，顯示提示
+        if (levelData) {
+            document.getElementById('message').innerText = "已載入分享關卡！進度會自動儲存。";
+        }
     }
 
+    // --- 儲存與讀取 (Local Storage) ---
     function loadData() {
         const savedLines = localStorage.getItem('sudoku-lines');
         if (savedLines) lines = JSON.parse(savedLines);
@@ -281,14 +313,16 @@
         if (savedBoard) {
             board = JSON.parse(savedBoard);
         } else {
-            for(let r=0; r<GRID_SIZE; r++) {
-                board[r] = [];
-                for(let c=0; c<GRID_SIZE; c++) {
-                    board[r][c] = { value: null, candidates: Array(10).fill(false), crossed: Array(10).fill(false), fixed: false };
-                }
+            resetBoardData();
+        }
+    }
+
+    function resetBoardData() {
+        for(let r=0; r<GRID_SIZE; r++) {
+            board[r] = [];
+            for(let c=0; c<GRID_SIZE; c++) {
+                board[r][c] = { value: null, candidates: Array(10).fill(false), crossed: Array(10).fill(false), fixed: false };
             }
-            // 預設題目 (如果沒有存檔)
-            board[7][1] = { value: 3, candidates: Array(10).fill(false), crossed: Array(10).fill(false), fixed: true };
         }
     }
 
@@ -297,6 +331,77 @@
         localStorage.setItem('sudoku-board', JSON.stringify(board));
     }
 
+    // --- 分享功能 (URL Encoding) ---
+    function shareLevel() {
+        // 1. 收集目前的線條資料
+        // 2. 收集目前的"已知數字" (Fixed numbers) - 不分享使用者的解題進度
+        const fixedNumbers = [];
+        for(let r=0; r<GRID_SIZE; r++) {
+            for(let c=0; c<GRID_SIZE; c++) {
+                if(board[r][c].fixed && board[r][c].value) {
+                    fixedNumbers.push({r, c, v: board[r][c].value});
+                }
+            }
+        }
+
+        const levelObj = {
+            l: lines,       // Lines
+            n: fixedNumbers // Numbers
+        };
+
+        try {
+            const jsonStr = JSON.stringify(levelObj);
+            const encoded = btoa(jsonStr); // Base64 編碼
+            const shareURL = window.location.href.split('?')[0] + '?level=' + encodeURIComponent(encoded);
+            
+            // 複製到剪貼簿
+            navigator.clipboard.writeText(shareURL).then(() => {
+                alert('✅ 關卡連結已複製！\n\n您可以將連結傳給朋友，他們就能玩您設計的關卡。');
+            }).catch(err => {
+                prompt('請手動複製連結：', shareURL);
+            });
+        } catch (e) {
+            alert('分享失敗，資料過大');
+        }
+    }
+
+    function loadLevelFromURL(encodedData) {
+        try {
+            const jsonStr = atob(decodeURIComponent(encodedData));
+            const levelObj = JSON.parse(jsonStr);
+            
+            // 重置當前盤面
+            resetBoardData();
+            lines = levelObj.l || [];
+            
+            // 填入題目數字
+            if (levelObj.n) {
+                levelObj.n.forEach(item => {
+                    if(item.r >=0 && item.r <9 && item.c >=0 && item.c <9) {
+                        board[item.r][item.c] = { 
+                            value: item.v, 
+                            candidates: Array(10).fill(false), 
+                            crossed: Array(10).fill(false), 
+                            fixed: true 
+                        };
+                    }
+                });
+            }
+            
+            // 儲存到本地，這樣重新整理後還是在這個關卡
+            saveData();
+            
+            // 清除 URL 參數，避免重整後又重新載入題目(覆蓋進度)
+            window.history.replaceState({}, document.title, window.location.pathname);
+            
+        } catch (e) {
+            console.error(e);
+            alert('關卡載入失敗，連結可能已損壞。將載入本地進度。');
+            loadData();
+        }
+    }
+
+    // --- 渲染與邏輯 ---
     function renderGrid() {
         const gridEl = document.getElementById('grid');
         gridEl.innerHTML = '';
@@ -306,7 +411,6 @@
                 cell.className = `cell row-${r} col-${c}`;
                 cell.dataset.r = r; cell.dataset.c = c;
                 
-                // 綁定事件處理長按
                 cell.addEventListener('touchstart', (e) => handleCellTouchStart(r, c, e));
                 cell.addEventListener('touchend', handleCellTouchEnd);
                 cell.addEventListener('mousedown', (e) => handleCellTouchStart(r, c, e));
@@ -451,13 +555,11 @@
         }
     }
 
-    // --- 事件處理 ---
     function handleCellTouchStart(r, c, e) {
         if (!isEditMode) return;
         longPressTimer = setTimeout(() => {
-            // 長按觸發設定已知數字
-            e.preventDefault(); // 防止觸發 click
-            const val = prompt("設定已知數字 (1-9)，輸入 0 或空值清除：");
+            e.preventDefault(); 
+            const val = prompt("設定此格為題目數字 (1-9)，輸入 0 或空值可清除：");
             if (val !== null) {
                 const num = parseInt(val);
                 if (num >= 1 && num <= 9) {
@@ -469,18 +571,15 @@
                 refreshBoardView();
                 clearSelection();
             }
-        }, 500); // 500ms 長按
+        }, 500); 
     }
 
     function handleCellTouchEnd() {
-        if (longPressTimer) {
-            clearTimeout(longPressTimer);
-            longPressTimer = null;
-        }
+        if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
     }
 
     function onCellClick(r, c, e) {
-        if (longPressTimer) return; // 如果是長按操作，忽略點擊
+        if (longPressTimer) return;
         if (isEditMode) handleEditClick(r, c); else handleSolverClick(r, c);
     }
 
@@ -521,14 +620,22 @@
         const solverToolbar = document.getElementById('solver-toolbar');
         const cascadePanel = document.getElementById('cascade-panel');
         const msg = document.getElementById('message');
+        const shareBtn = document.getElementById('share-btn');
+        
         clearSelection(); updateContextTools();
         if (isEditMode) {
-            btn.innerHTML = '✅ 完成編輯'; btn.classList.add('editing');
-            clearBtn.classList.remove('hidden'); solverToolbar.classList.add('hidden'); cascadePanel.classList.add('hidden');
-            msg.className = 'message-box msg-info'; msg.innerText = '編輯模式：點兩點連線(重複刪除)，長按格子設定題目數字';
+            btn.innerHTML = '✅ 完成設計'; btn.classList.add('editing');
+            clearBtn.classList.remove('hidden'); 
+            solverToolbar.classList.add('hidden'); 
+            cascadePanel.classList.add('hidden');
+            shareBtn.classList.add('hidden'); // 編輯時隱藏分享，避免分享到一半的狀態
+            msg.className = 'message-box msg-info'; msg.innerText = '編輯模式：點兩點連線，長按格子設定題目數字';
         } else {
-            btn.innerHTML = '🛠️ 編輯模式'; btn.classList.remove('editing');
-            clearBtn.classList.add('hidden'); solverToolbar.classList.remove('hidden'); cascadePanel.classList.remove('hidden');
+            btn.innerHTML = '🛠️ 編輯關卡'; btn.classList.remove('editing');
+            clearBtn.classList.add('hidden'); 
+            solverToolbar.classList.remove('hidden'); 
+            cascadePanel.classList.remove('hidden');
+            shareBtn.classList.remove('hidden');
             msg.className = 'message-box msg-ok'; msg.innerText = '請開始解題';
             saveData(); validateBoard(); refreshBoardView(); 
         }
@@ -553,13 +660,9 @@
     }
 
     function clearAllData() {
-        if(confirm('確定要清空所有線條和題目數字嗎？此操作無法復原。')) {
+        if(confirm('確定要清空所有線條和題目數字嗎？')) {
             lines = [];
-            for(let r=0; r<GRID_SIZE; r++) {
-                for(let c=0; c<GRID_SIZE; c++) {
-                    board[r][c] = { value: null, candidates: Array(10).fill(false), crossed: Array(10).fill(false), fixed: false };
-                }
-            }
+            resetBoardData();
             saveData(); drawLines(); refreshBoardView();
         }
     }
@@ -586,9 +689,16 @@
         saveData(); refreshBoardView(); validateBoard(); updateContextTools();
     }
 
+    function setFixedValue(r, c, val) {
+        board[r][c].value = val;
+        board[r][c].fixed = true;
+        const cell = document.querySelector(`.cell[data-r="${r}"][data-c="${c}"]`);
+        cell.classList.add('fixed');
+    }
+
     function drawLines() {
         const svg = document.getElementById('svg-layer'); svg.innerHTML = ''; 
-        const cellSize = 44; const offset = cellSize / 2;
+        const cellSize = 42; const offset = cellSize / 2;
         lines.forEach(l => {
             const x1 = l.c1 * cellSize + offset; const y1 = l.r1 * cellSize + offset;
             const x2 = l.c2 * cellSize + offset; const y2 = l.r2 * cellSize + offset;
