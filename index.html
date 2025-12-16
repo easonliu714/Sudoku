@@ -3,12 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>質數線條數獨 (分享版)</title>
+    <title>質數線條數獨</title>
     <style>
         :root {
             --bg-color: #f0f2f5;
             --grid-border: #333;
-            --cell-size: 42px; /* 手機適配微調 */
+            --cell-size: 42px;
             --pencil-color: #0069d9;
             --default-cand-color: #90a4ae;
             --cross-color: #dc3545;
@@ -48,7 +48,6 @@
             display: flex;
             gap: 5px;
             justify-content: center;
-            flex-wrap: wrap;
         }
 
         .mode-switch-btn {
@@ -221,18 +220,6 @@
         }
         .pair-item strong { color: #000; }
 
-        /* Modal 樣式 */
-        .modal-overlay {
-            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-            background: rgba(0,0,0,0.5); z-index: 1000; display: none;
-            justify-content: center; align-items: center;
-        }
-        .modal {
-            background: white; padding: 20px; border-radius: 10px; width: 80%; max-width: 300px;
-            text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-        }
-        .modal button { margin-top: 10px; padding: 8px 16px; cursor: pointer; }
-
     </style>
 </head>
 <body>
@@ -281,12 +268,12 @@
     };
 
     function init() {
-        // 優先檢查 URL 是否有分享的關卡參數
         const urlParams = new URLSearchParams(window.location.search);
-        const levelData = urlParams.get('level');
+        const dataStr = urlParams.get('data');
 
-        if (levelData) {
-            loadLevelFromURL(levelData);
+        if (dataStr) {
+            loadCompressedLevel(dataStr);
+            document.getElementById('message').innerText = "已載入分享關卡！";
         } else {
             loadData();
         }
@@ -296,10 +283,68 @@
         drawLines();
         refreshBoardView();
         updateContextTools(); 
-        
-        // 如果是分享連結進來的，顯示提示
-        if (levelData) {
-            document.getElementById('message').innerText = "已載入分享關卡！進度會自動儲存。";
+    }
+
+    // --- 壓縮與分享邏輯 (Digit Stream) ---
+    function shareLevel() {
+        // 1. 線條：每線4碼 (r1 c1 r2 c2)
+        let linesStr = lines.map(l => `${l.r1}${l.c1}${l.r2}${l.c2}`).join('');
+
+        // 2. 題目：每數3碼 (r c v)
+        let numsStr = "";
+        for(let r=0; r<GRID_SIZE; r++) {
+            for(let c=0; c<GRID_SIZE; c++) {
+                if(board[r][c].fixed && board[r][c].value) {
+                    numsStr += `${r}${c}${board[r][c].value}`;
+                }
+            }
+        }
+
+        const code = `${linesStr}_${numsStr}`;
+        const shareURL = window.location.href.split('?')[0] + '?data=' + code;
+            
+        navigator.clipboard.writeText(shareURL).then(() => {
+            alert('✅ 關卡連結已複製！\n\n網址已壓縮，可直接分享至 Threads。');
+        }).catch(err => {
+            prompt('請手動複製連結：', shareURL);
+        });
+    }
+
+    function loadCompressedLevel(dataStr) {
+        try {
+            resetBoardData();
+            lines = [];
+            const parts = dataStr.split('_');
+            const linesPart = parts[0];
+            const numsPart = parts[1] || "";
+
+            // 解析線條
+            for (let i = 0; i < linesPart.length; i += 4) {
+                const r1 = parseInt(linesPart[i]);
+                const c1 = parseInt(linesPart[i+1]);
+                const r2 = parseInt(linesPart[i+2]);
+                const c2 = parseInt(linesPart[i+3]);
+                lines.push({r1, c1, r2, c2});
+            }
+
+            // 解析題目
+            for (let i = 0; i < numsPart.length; i += 3) {
+                const r = parseInt(numsPart[i]);
+                const c = parseInt(numsPart[i+1]);
+                const v = parseInt(numsPart[i+2]);
+                if (!isNaN(r)) {
+                    board[r][c] = { 
+                        value: v, candidates: Array(10).fill(false), crossed: Array(10).fill(false), fixed: true 
+                    };
+                }
+            }
+            saveData();
+            // 清理網址
+            window.history.replaceState({}, document.title, window.location.pathname);
+        } catch (e) {
+            console.error(e);
+            alert('關卡載入失敗，格式錯誤。');
+            loadData();
         }
     }
 
@@ -310,11 +355,8 @@
         else lines = [];
 
         const savedBoard = localStorage.getItem('sudoku-board');
-        if (savedBoard) {
-            board = JSON.parse(savedBoard);
-        } else {
-            resetBoardData();
-        }
+        if (savedBoard) board = JSON.parse(savedBoard);
+        else resetBoardData();
     }
 
     function resetBoardData() {
@@ -331,76 +373,6 @@
         localStorage.setItem('sudoku-board', JSON.stringify(board));
     }
 
-    // --- 分享功能 (URL Encoding) ---
-    function shareLevel() {
-        // 1. 收集目前的線條資料
-        // 2. 收集目前的"已知數字" (Fixed numbers) - 不分享使用者的解題進度
-        const fixedNumbers = [];
-        for(let r=0; r<GRID_SIZE; r++) {
-            for(let c=0; c<GRID_SIZE; c++) {
-                if(board[r][c].fixed && board[r][c].value) {
-                    fixedNumbers.push({r, c, v: board[r][c].value});
-                }
-            }
-        }
-
-        const levelObj = {
-            l: lines,       // Lines
-            n: fixedNumbers // Numbers
-        };
-
-        try {
-            const jsonStr = JSON.stringify(levelObj);
-            const encoded = btoa(jsonStr); // Base64 編碼
-            const shareURL = window.location.href.split('?')[0] + '?level=' + encodeURIComponent(encoded);
-            
-            // 複製到剪貼簿
-            navigator.clipboard.writeText(shareURL).then(() => {
-                alert('✅ 關卡連結已複製！\n\n您可以將連結傳給朋友，他們就能玩您設計的關卡。');
-            }).catch(err => {
-                prompt('請手動複製連結：', shareURL);
-            });
-        } catch (e) {
-            alert('分享失敗，資料過大');
-        }
-    }
-
-    function loadLevelFromURL(encodedData) {
-        try {
-            const jsonStr = atob(decodeURIComponent(encodedData));
-            const levelObj = JSON.parse(jsonStr);
-            
-            // 重置當前盤面
-            resetBoardData();
-            lines = levelObj.l || [];
-            
-            // 填入題目數字
-            if (levelObj.n) {
-                levelObj.n.forEach(item => {
-                    if(item.r >=0 && item.r <9 && item.c >=0 && item.c <9) {
-                        board[item.r][item.c] = { 
-                            value: item.v, 
-                            candidates: Array(10).fill(false), 
-                            crossed: Array(10).fill(false), 
-                            fixed: true 
-                        };
-                    }
-                });
-            }
-            
-            // 儲存到本地，這樣重新整理後還是在這個關卡
-            saveData();
-            
-            // 清除 URL 參數，避免重整後又重新載入題目(覆蓋進度)
-            window.history.replaceState({}, document.title, window.location.pathname);
-            
-        } catch (e) {
-            console.error(e);
-            alert('關卡載入失敗，連結可能已損壞。將載入本地進度。');
-            loadData();
-        }
-    }
-
     // --- 渲染與邏輯 ---
     function renderGrid() {
         const gridEl = document.getElementById('grid');
@@ -411,6 +383,7 @@
                 cell.className = `cell row-${r} col-${c}`;
                 cell.dataset.r = r; cell.dataset.c = c;
                 
+                // 觸控與滑鼠事件
                 cell.addEventListener('touchstart', (e) => handleCellTouchStart(r, c, e));
                 cell.addEventListener('touchend', handleCellTouchEnd);
                 cell.addEventListener('mousedown', (e) => handleCellTouchStart(r, c, e));
@@ -462,7 +435,9 @@
     function getImpossibleCandidates(r, c) {
         const cellData = board[r][c];
         const impossible = new Set();
+        // 1. 手動排除
         for (let n = 1; n <= 9; n++) { if (cellData.crossed[n]) impossible.add(n); }
+        // 2. 數獨規則
         for (let i = 0; i < 9; i++) {
             if (i !== c && board[r][i].value !== null) impossible.add(board[r][i].value);
             if (i !== r && board[i][c].value !== null) impossible.add(board[i][c].value);
@@ -475,12 +450,15 @@
                 if ((rr !== r || cc !== c) && board[rr][cc].value !== null) impossible.add(board[rr][cc].value);
             }
         }
+        // 3. 連線規則與鄰居
         let lineDegree = 0; let neighbors = [];
         lines.forEach(l => {
             if (l.r1 === r && l.c1 === c) { lineDegree++; neighbors.push({r: l.r2, c: l.c2}); }
             else if (l.r2 === r && l.c2 === c) { lineDegree++; neighbors.push({r: l.r1, c: l.c1}); }
         });
+        
         for (let n = 1; n <= 9; n++) { if (numberPairs[n].length < lineDegree) impossible.add(n); }
+        
         if (neighbors.length > 0) {
             neighbors.forEach(nb => {
                 const nbVal = board[nb.r][nb.c].value;
@@ -628,7 +606,7 @@
             clearBtn.classList.remove('hidden'); 
             solverToolbar.classList.add('hidden'); 
             cascadePanel.classList.add('hidden');
-            shareBtn.classList.add('hidden'); // 編輯時隱藏分享，避免分享到一半的狀態
+            shareBtn.classList.add('hidden'); 
             msg.className = 'message-box msg-info'; msg.innerText = '編輯模式：點兩點連線，長按格子設定題目數字';
         } else {
             btn.innerHTML = '🛠️ 編輯關卡'; btn.classList.remove('editing');
@@ -687,13 +665,6 @@
         if (board[r][c].fixed) return;
         board[r][c].value = null; board[r][c].candidates.fill(false); board[r][c].crossed.fill(false);
         saveData(); refreshBoardView(); validateBoard(); updateContextTools();
-    }
-
-    function setFixedValue(r, c, val) {
-        board[r][c].value = val;
-        board[r][c].fixed = true;
-        const cell = document.querySelector(`.cell[data-r="${r}"][data-c="${c}"]`);
-        cell.classList.add('fixed');
     }
 
     function drawLines() {
